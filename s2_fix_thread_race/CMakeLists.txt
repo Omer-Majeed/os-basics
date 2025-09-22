@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(s1_catch_thread_race CXX)
+project(s2_fix_thread_race CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -11,4 +11,4 @@ add_link_options(-fsanitize=thread)
 # add_compile_options(-fsanitize=address)
 # add_link_options(-fsanitize=address)
 
-add_executable(s1_catch_thread_race race.cc)
+add_executable(s2_fix_thread_race race.cc)
