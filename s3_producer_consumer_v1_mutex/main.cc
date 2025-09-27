@@ -56,12 +56,14 @@ typedef struct alignas(64) param {
     int thread_index = -1;
     Queue *p_queue;
     Queue *p_feedback_queue;
+    std::mutex hold;
+    double time_taken;
 } param;
 
 int counter = 0;
 constexpr int T = 8, INC = 100'000;
 
-#define TEST_MAX_MESSAGES    10
+#define TEST_MAX_MESSAGES    1000
 
 void* producer(void* p) {
     param *p_param = (param*) p;
@@ -69,23 +71,35 @@ void* producer(void* p) {
     uint64_t tid = (uint64_t) pthread_self();
     Queue *p_queue = p_param->p_queue;
 
-    cout << "Initialized Producer thread[" << p_param->thread_index << "] = " << pthread_self() << " as_uint64_t = " << tid << endl;
+    cout << "Initialized Producer thread[" << p_param->thread_index << "] = " << pthread_self() << " as_uint64_t = " << (void*) tid << " pid = " << getpid() << " ppid = " << getppid() << endl;
 
     p_param->init_flag = true;
     int i = 0;
 
-    while (p_param->terminate == false) {
-        for (; i < TEST_MAX_MESSAGES; ++i) {
-            log_data *new_log = new log_data();
-            memset (new_log, 0,  sizeof(log_data));
-            new_log->thread_index = thread_idx;
-            new_log->tid = tid;
-            snprintf(new_log->data, 1024, "Producer Thread-Index[%d] tid:%llx Log Data Count=%d\n", thread_idx, tid, i);
+    p_param->hold.lock();
+    p_param->hold.unlock();
 
-            p_queue->Lock();
-            p_queue->Push(new_log);
-            p_queue->Unlock();
-        }
+    cout << "Start Test -- Producer thread[" << p_param->thread_index << "] = " << pthread_self() << " as_uint64_t = " << tid << endl;
+
+    clock_t start_time = clock();
+    for (; i < TEST_MAX_MESSAGES; ++i) {
+        log_data *new_log = new log_data();
+        memset (new_log, 0,  sizeof(log_data));
+        new_log->thread_index = thread_idx;
+        new_log->tid = tid;
+        snprintf(new_log->data, 1024, "Producer Thread-Index[%d] tid:%llx Log Data Count=%d\n", thread_idx, tid, i);
+
+        p_queue->Lock();
+        p_queue->Push(new_log);
+        p_queue->Unlock();
+    }
+    clock_t end_time = clock();
+
+    p_param->time_taken = ((double)(end_time - start_time)) / (CLOCKS_PER_SEC * TEST_MAX_MESSAGES);
+
+    while (p_param->terminate == false) {
+        cout << "Producer thread[" << p_param->thread_index << "] = " << pthread_self() << " Waiting for more tasks" << endl;
+        usleep(1000'000);
     }
 
     cout << "Exiting Producer thread[" << p_param->thread_index << "] = " << pthread_self() << endl;
@@ -132,6 +146,8 @@ int main() {
     Queue out_queue;
     Queue in_queue;
 
+    cout << "Initialized Parent " << pthread_self() << " pid = " << getpid() << " ppid = " << getppid() << endl;
+
     cons_param.thread_index = 0;
     cons_param.p_queue = &out_queue;
     cons_param.p_feedback_queue = &in_queue;
@@ -143,11 +159,17 @@ int main() {
     for (int t = 0; t < T; ++t) {
         params[t].thread_index = t;
         params[t].p_queue = &out_queue;
+        params[t].hold.lock();
         pthread_create(&prod_thr[t], nullptr, producer, &params[t]);
+    }
 
+    for (int t = 0; t < T; ++t) {
         while(params[t].init_flag == false);
     }
-    
+
+    for (int t = 0; t < T; ++t) {
+        params[t].hold.unlock();
+    }
 
     int expected = TEST_MAX_MESSAGES * T;
     int rsp_count = 0;
@@ -161,7 +183,7 @@ int main() {
         assert (data);
         in_queue.Unlock();
 
-        cout << "Message:" << rsp_count << " Received data Produced by Thread-Index:" << data->thread_index << " tid:" << data->tid << " message:" << data->data << endl;
+        // cout << "Message:" << rsp_count << " Received data Produced by Thread-Index:" << data->thread_index << " tid:" << data->tid << " message:" << data->data << endl;
         delete data;
         --expected;
         ++rsp_count;
@@ -175,6 +197,10 @@ int main() {
         params[t].terminate = true;
 
         while (params[t].terminated == false);
+    }
+
+    for (int t = 0; t < T; ++t) {
+        cout << "AvgTime taken by Producer thread[" << params[t].thread_index << "] for " << TEST_MAX_MESSAGES << " messages = " << params[t].time_taken << " seconds" << endl;
     }
 
     cout << "\nExiting Main Process" << endl;
