@@ -6,6 +6,7 @@
 #include <vector>
 #include <queue>
 #include <pthread.h>
+#include <thread>
 #include <unistd.h>
 #include <assert.h>
 
@@ -19,7 +20,7 @@ typedef struct alignas(64) log_data {
 
 class Queue {
     std::queue<log_data *> m_queue;
-    std::mutex m_mutex;
+    std::atomic<bool> m_mutex{false};
     public:
     Queue() {}
     void Push(log_data *_data);
@@ -43,10 +44,13 @@ log_data * Queue::Pop() {
     return ret;
 }
 void Queue::Lock() {
-    m_mutex.lock();
+    while (m_mutex.exchange(true)) {
+        // std::this_thread::yield();   // both of these can we used interchangeably
+        usleep(10); // sometimes its better to sleep than yield, yield puts pressure on scheduler since it puts the thread to ready queue instantaneously
+    }
 }
 void Queue::Unlock() {
-    m_mutex.unlock();
+    m_mutex.store(false);
 }
 
 typedef struct alignas(64) param {
